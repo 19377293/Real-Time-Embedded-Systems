@@ -1,0 +1,172 @@
+//19377283
+//CW2 - REAL TIME EMBEDDED SYSTEMS
+
+//LIBRARIES-------------
+
+#include "mbed.h"
+#include "VL53L0X.h"
+#include "SRF05.h"
+
+//HARDWARE----------------
+
+DigitalOut notification (LED2);
+I2C i2c(PB_9, PB_8);
+
+SRF05 srf_Left(PA_10, PB_3);
+SRF05 srf_Right(PA_8, PA_9);
+
+PwmOut Drive_pin_A(PB_0);
+PwmOut Drive_pin_B(PB_10);
+PwmOut Drive_pin_C(PB_4);
+
+VL53L0X sensor(&i2c);
+Serial usb(USBTX, USBRX, 9600);
+
+//VARIABLES----------------
+
+float Left_Ultrasonic;
+float Right_Ultrasonic;
+float ToF_filtered;
+
+int A, B, C;
+int Command;
+
+
+//FUNCTIONS (SPEEDS)-----------
+
+void Full_power_forward() {
+    Drive_pin_C.pulsewidth_ms(0);
+    Drive_pin_B.pulsewidth_ms(20);
+}
+
+void Half_power_forward() {
+    Drive_pin_C.pulsewidth_ms(0);
+    Drive_pin_B.pulsewidth_ms(10);
+}
+
+void Slow_forward() {
+    Drive_pin_C.pulsewidth_ms(0);
+    Drive_pin_B.pulsewidth_ms(8);
+}
+
+void Half_power_reverse() {
+    Drive_pin_C.pulsewidth_ms(10);
+    Drive_pin_B.pulsewidth_ms(0);
+}
+
+void Stop(){
+    Drive_pin_C.pulsewidth_ms(0);
+    Drive_pin_B.pulsewidth_ms(0);
+}
+
+//FUNCTIONS (DIRECTION)
+void Straight()   { Drive_pin_A.pulsewidth_us(1500); }
+void Half_left()  { Drive_pin_A.pulsewidth_us(1750); }
+void Full_left()  { Drive_pin_A.pulsewidth_us(2000); }
+void Half_right() { Drive_pin_A.pulsewidth_us(1250); }
+void Full_right() { Drive_pin_A.pulsewidth_us(1000); }
+
+//MAIN----------------
+
+int main()
+{
+    //VARIABLES FIRST VALUE
+    notification = 0;
+    ToF_filtered = 100;
+    Right_Ultrasonic = 100;
+    Left_Ultrasonic = 100;
+
+
+    Drive_pin_A.period_ms(20);
+    Drive_pin_B.period_ms(20);
+    Drive_pin_C.period_ms(20);
+
+    Drive_pin_B.pulsewidth_ms(0);
+    Drive_pin_C.pulsewidth_ms(0);
+
+    sensor.init();
+    sensor.setModeContinuous();
+    sensor.startContinuous();
+    
+  
+    while (1)
+    {
+
+        //FILTER TOF-----------
+        ToF_filtered = (ToF_filtered*.2)+ (0.8*sensor.getRangeMillimeters());
+
+        //FILTER ULTASONIC------
+        Right_Ultrasonic = (0.85 * Right_Ultrasonic) + (0.15 * srf_Right.read());
+        Left_Ultrasonic = (0.85 * Left_Ultrasonic) + (0.15 * srf_Left.read());
+
+
+        //COMMANDS OPERATIONS FOR CASES---------
+        if(Left_Ultrasonic < 60) { A= 1;} else {A= 0;} //cm
+        if(ToF_filtered < 250) {B= 1;} else {B=0;} //mm
+        if(Right_Ultrasonic < 60) {C=1;} else {C=0;} //cm
+
+        Command = A + 2*B + 4*C;
+
+        //LOG OF COMMANDS AND SENSORS DATA FOR TESTS AND EVALUATIONS
+        usb.printf("ToF: %.0f  L: %.0f  R: %.0f  C: %d            A: %d    B:%d     C:%d\r\n",ToF_filtered, Left_Ultrasonic, Right_Ultrasonic, Command, A, B, C);
+
+        //COMMANDS
+        switch (Command)
+        {
+            case 0: //FORWARD FULL POWER going STRAIGHT
+                Full_power_forward();
+                Straight();
+                break;
+
+            case 1: //FORWARD SLOW POWER with HALF TURN RIGHT
+                Half_power_forward();
+                Half_right();
+                break;
+
+            case 2: //REVERSE HALF POWER if LEFT A BIGGER SPACE, TURN LEFT ELSE RIGHT 
+                Half_power_reverse();
+                if(Left_Ultrasonic > Right_Ultrasonic) 
+                 {
+                    Half_left();
+                 }
+                else
+                 {Half_right();}
+                break;
+
+            case 3: //REVERSE HALF POWER with FULL TURN RIGHT
+                Half_power_reverse();
+                Full_right();
+                break;
+
+            case 4: //SLOW FORWARD with a HALF LEFT TURN
+                Slow_forward();
+                Half_left();
+                break;
+
+            case 5: //FORWARD SLOW POWER with STRAIGHT
+                Half_power_forward();
+                Straight();
+                break;
+
+            case 6: //REVERSE HALF POWER with HALF TURN LEFT
+                Half_power_reverse();
+                Half_left();;
+                break;
+
+            case 7: //REVERSE HALF POWER if LEFT A BIGGER SPACE, TURN LEFT ELSE RIGHT 
+                Half_power_reverse();
+                if(Left_Ultrasonic > Right_Ultrasonic)
+                    {Half_left();}
+                else 
+                    {Half_right();}
+                break;
+            
+            default: //ANY OF THE OTHER CASES MAKE A TOTAL STOP
+                Stop();
+                break;
+        
+        } 
+
+        wait(0.05);
+    }
+}
